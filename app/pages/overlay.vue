@@ -39,7 +39,7 @@
   
   // ゲージの長さ計算 (50%を基準に増減)
   const p1BarPercent = computed(() => {
-    let diffRatio = Math.pow(absDiff.value / MAX_SCORE_DIFF, 0.5)*0.95
+    let diffRatio = Math.sign(diff.value)*Math.pow(absDiff.value / MAX_SCORE_DIFF, 0.5)*0.95
     // 振り切れ防止 (-0.95 ～ 0.95)
     if (diffRatio > 0.95) diffRatio = 0.95
     if (diffRatio < -0.95) diffRatio = -0.95
