@@ -2,7 +2,7 @@
   import { ref, computed, onMounted, onUnmounted } from 'vue'
   
   // --- 状態管理 ---
-  const ocrScores = ref({ p1: 0, p2: 0 }) // Pythonから来るスコア
+  const ocrScores = ref({ p1: 998000, p2: 998000 }) // Pythonから来るスコア
   const config = ref({
     p1Color: '#ff4b4b',
     p2Color: '#4b4bff',
@@ -39,7 +39,7 @@
   
   // ゲージの長さ計算 (50%を基準に増減)
   const p1BarPercent = computed(() => {
-    let diffRatio = diff.value / MAX_SCORE_DIFF
+    let diffRatio = Math.pow(absDiff.value / MAX_SCORE_DIFF, 0.5)*0.95
     // 振り切れ防止 (-0.95 ～ 0.95)
     if (diffRatio > 0.95) diffRatio = 0.95
     if (diffRatio < -0.95) diffRatio = -0.95
@@ -54,7 +54,8 @@
   
   const connect = () => {
     // 環境に合わせてURLを変更してください (Fly.ioなら wss://...)
-    const WS_URL = "wss://score-diff-server.fly.dev/ws"
+    const WS_URL = null
+    // const WS_URL = "wss://score-diff-server.fly.dev/ws"
     
     ws = new WebSocket(WS_URL)
   
