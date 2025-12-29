@@ -2,7 +2,7 @@
   import { ref, computed, onMounted, onUnmounted } from 'vue'
   
   // --- 状態管理 ---
-  const ocrScores = ref({ p1: 998000, p2: 998000 }) // Pythonから来るスコア
+  const ocrScores = ref({ p1: 0, p2: 0 }) // Pythonから来るスコア
   const config = ref({
     p1Color: '#ff4b4b',
     p2Color: '#4b4bff',
@@ -54,8 +54,8 @@
   
   const connect = () => {
     // 環境に合わせてURLを変更してください (Fly.ioなら wss://...)
-    const WS_URL = null
-    // const WS_URL = "wss://score-diff-server.fly.dev/ws"
+    // const WS_URL = null
+    const WS_URL = "wss://score-diff-server.fly.dev/ws"
     
     ws = new WebSocket(WS_URL)
   
