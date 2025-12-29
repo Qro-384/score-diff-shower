@@ -109,16 +109,16 @@
           <div 
           class="bar bar-p1" 
           :style="{ 
-            width: (config.swapSides ? p1BarPercent : p2BarPercent) + '%',
-            background:  (config.swapSides ? config.p1Color : config.p2Color)
+            width: (config.swapSides ? p2BarPercent : p1BarPercent) + '%',
+            background:  (config.swapSides ? config.p2Color : config.p1Color)
           }"
           ></div>
 
           <div 
           class="bar bar-p2" 
           :style="{ 
-            width: (config.swapSides ? p2BarPercent : p1BarPercent) + '%',
-            background:  (config.swapSides ? config.p2Color : config.p1Color)
+            width: (config.swapSides ? p1BarPercent : p2BarPercent) + '%',
+            background:  (config.swapSides ? config.p1Color : config.p2Color)
           }"
           ></div>
         </div>
