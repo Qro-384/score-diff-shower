@@ -1,5 +1,5 @@
 <script setup>
-    import { ref, onMounted, onUnmounted, watch } from 'vue'
+    import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
     
     // --- 設定: 事前に決めた5色 ---
     const PRESET_COLORS = [
@@ -24,6 +24,7 @@
     const liveScores = ref({ p1: 0, p2: 0 })
     
     const isConnected = ref(false)
+    const isRemoteUpdate = ref(false)
     let ws = null
     
     // --- WebSocket 通信 ---
@@ -42,7 +43,9 @@
             // サーバーから最新設定を受け取る
             // 手動モード中は入力欄が勝手に書き換わると困るので、モード同期は慎重に行う
             // ここでは単純に全て同期します
+            isRemoteUpdate.value = true
             config.value = { ...config.value, ...msg.data }
+            nextTick(() => { isRemoteUpdate.value = false })
           } else if (msg.type === 'score') {
             // OCRからの生スコア（監視用）
             liveScores.value = msg.data
@@ -89,6 +92,7 @@
     // 手動スコア変更（入力があるたびに送信）
     // watchを使って、manualScoresの中身が変わったら自動送信する
     watch(() => config.value.manualScores, () => {
+      if (isRemoteUpdate.value) return
       if (config.value.manualMode) {
         sendConfig()
       }

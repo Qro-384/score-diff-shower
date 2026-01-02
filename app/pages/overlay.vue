@@ -126,6 +126,10 @@
       </div>
   
       <div class="separator"></div>
+      <div class="team-separator"
+      :style="{
+        left: (config.swapSides ? p2BarPercent : p1BarPercent) + '%'
+      }"></div>
   
       <div class="score-text-area" :class="{ 'is-swapped': config.swapSides }">
         <div class="score-item" id="p1-score">{{ scores.p1 }}</div>
@@ -239,6 +243,17 @@
   }
   
   .separator {
+    width: 4px;
+    background-color: black;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: 35px;
+    height: 10px;
+    z-index: 10;
+  }
+
+  .team-separator {
     width: 4px;
     background-color: white;
     position: absolute;
