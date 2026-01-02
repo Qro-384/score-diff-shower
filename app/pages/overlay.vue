@@ -6,7 +6,7 @@
   const config = ref({
     p1Color: '#ff4b4b',
     p2Color: '#4b4bff',
-    drawColor: 'black',
+    drawColor: 'white',
     swapSides: false,
     // コントローラーと同じ初期値
     manualMode: false,
@@ -199,7 +199,7 @@
     white-space: nowrap;
     pointer-events: none;
     font-size: 50px;
-    -webkit-text-stroke: 1px black;
+    filter: drop-shadow(0px 0px 2px black) drop-shadow(0px 0px 2px black)
   }
   
   /* --- ゲージバー --- */
