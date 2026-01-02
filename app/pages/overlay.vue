@@ -243,14 +243,18 @@
   }
   
   .separator {
-    width: 4px;
-    background-color: black;
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-right: 7px solid transparent;
+    border-left: 7px solid transparent;
+    border-top: 20px solid #000000;
+    border-bottom: 0;
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    top: 35px;
-    height: 10px;
-    z-index: 10;
+    top: -10px;
+    z-index: 20;
   }
 
   .team-separator {
@@ -262,6 +266,7 @@
     top: 4px;
     height: 32px;
     z-index: 10;
+    transition: left 0.5s cubic-bezier(0.22, 1, 0.36, 1);
   }
   
   </style>
