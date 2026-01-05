@@ -3,6 +3,7 @@
   
   // --- 状態管理 ---
   const ocrScores = ref({ p1: 0, p2: 0 }) // Pythonから来るスコア
+  const smoothDiff = ref(0)
   const config = ref({
     p1Color: '#ff4b4b',
     p2Color: '#4b4bff',
@@ -14,9 +15,11 @@
   })
   
     // --- 定数 ---
-    const MAX_SCORE_DIFF = 20000 // ゲージが振り切れる点差
+  const MAX_SCORE_DIFF = 20000 // ゲージが振り切れる点差
+  const LERP_FACTOR = 1
+  const FILTER_WINDOW_SIZE = 7 // メジアンフィルタのウィンドウサイズ
 
-    const scores = computed(() => {
+  const scores = computed(() => {
     if (config.value.manualMode) {
       return config.value.manualScores
     } else {
@@ -24,11 +27,12 @@
     }
   })
   
+
   // --- 計算プロパティ (Computed) ---
   // スコア差分
   const diff = computed(() => scores.value.p1 - scores.value.p2)
   const absDiff = computed(() => Math.abs(diff.value))
-  
+
   // 差分の色判定
   const diffColor = computed(() => {
     if (diff.value === 0) return config.value.drawColor
@@ -39,7 +43,8 @@
   
   // ゲージの長さ計算 (50%を基準に増減)
   const p1BarPercent = computed(() => {
-    let diffRatio = Math.sign(diff.value)*Math.pow(absDiff.value / MAX_SCORE_DIFF, 0.5)*0.95
+    const _diff = diff.value
+    let diffRatio = Math.sign(_diff)*Math.pow(Math.abs(_diff) / MAX_SCORE_DIFF, 0.5)*0.95
     // 振り切れ防止 (-0.95 ～ 0.95)
     if (diffRatio > 0.95) diffRatio = 0.95
     if (diffRatio < -0.95) diffRatio = -0.95
@@ -48,6 +53,24 @@
   })
   
   const p2BarPercent = computed(() => 100 - p1BarPercent.value)
+
+  // --- メジアンフィルタ処理 ---
+  const scoreHistory = { p1: [], p2: [] }
+
+  const getMedian = (arr) => {
+    if (arr.length === 0) return 0
+    const sorted = [...arr].sort((a, b) => a - b)
+    const mid = Math.floor(sorted.length / 2)
+    return sorted[mid]
+  }
+
+  const updateScores = (p1, p2) => {
+    scoreHistory.p1.push(p1)
+    scoreHistory.p2.push(p2)
+    if (scoreHistory.p1.length > FILTER_WINDOW_SIZE) scoreHistory.p1.shift()
+    if (scoreHistory.p2.length > FILTER_WINDOW_SIZE) scoreHistory.p2.shift()
+    ocrScores.value = { p1: getMedian(scoreHistory.p1), p2: getMedian(scoreHistory.p2) }
+  }
   
   // --- WebSocket 接続 ---
   let ws = null
@@ -71,16 +94,10 @@
           config.value = { ...config.value, ...msg.data }
         } else if (msg.type === 'score') {
           // スコア更新 (形式: { type: 'score', data: { p1:..., p2:... } })
-          scores.value = { 
-            p1: parseInt(msg.data.p1), 
-            p2: parseInt(msg.data.p2) 
-          }
+          updateScores(parseInt(msg.data.p1), parseInt(msg.data.p2))
         } else if (msg.p1 !== undefined) {
           // 旧形式 (形式: { p1: 100, p2: 200 }) への対応
-          scores.value = { 
-            p1: parseInt(msg.p1), 
-            p2: parseInt(msg.p2) 
-          }
+          updateScores(parseInt(msg.p1), parseInt(msg.p2))
         }
       } catch (e) {
         console.error("Data parse error", e)
