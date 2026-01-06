@@ -3,6 +3,7 @@
   
   // --- 状態管理 ---
   const ocrScores = ref({ p1: 0, p2: 0 }) // Pythonから来るスコア
+  const rawMedianScores = ref({ p1: 0, p2: 0 }) // メジアンフィルタ後の生スコア
   const smoothDiff = ref(0)
   const config = ref({
     p1Color: '#ff4b4b',
@@ -16,8 +17,11 @@
   
     // --- 定数 ---
   const MAX_SCORE_DIFF = 20000 // ゲージが振り切れる点差
-  const LERP_FACTOR = 1
+  const LERP_FACTOR = 0.1
   const FILTER_WINDOW_SIZE = 7 // メジアンフィルタのウィンドウサイズ
+  const SYNC_WAIT_MS = 500 // 相方のスコア更新を待つ最大時間(ms)
+  const MIN_SCORE_DELTA = 300 // 「ノーツ1つ分」とみなす最小点数差
+  const UPDATE_INTERVAL = 500 // 描画更新間隔(ms)
 
   const scores = computed(() => {
     if (config.value.manualMode) {
@@ -69,9 +73,12 @@
     scoreHistory.p2.push(p2)
     if (scoreHistory.p1.length > FILTER_WINDOW_SIZE) scoreHistory.p1.shift()
     if (scoreHistory.p2.length > FILTER_WINDOW_SIZE) scoreHistory.p2.shift()
-    ocrScores.value = { p1: getMedian(scoreHistory.p1), p2: getMedian(scoreHistory.p2) }
+    rawMedianScores.value = { p1: getMedian(scoreHistory.p1), p2: getMedian(scoreHistory.p2) }
   }
-  
+
+  // --- 定期更新用タイマー ---
+  let updateTimer = null
+
   // --- WebSocket 接続 ---
   let ws = null
   
@@ -112,10 +119,14 @@
   
   onMounted(() => {
     connect()
+    updateTimer = setInterval(() => {
+      ocrScores.value = rawMedianScores.value
+    }, UPDATE_INTERVAL)
   })
   
   onUnmounted(() => {
     if (ws) ws.close()
+    if (updateTimer) clearInterval(updateTimer)
   })
   </script>
   
