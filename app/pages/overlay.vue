@@ -21,22 +21,25 @@
   const timedHistory = [] 
   const scoreHistory = { p1: [], p2: [] }
   
-  // ★バケツ（保留中のスコア増分）
-  const pendingDelta = { p1: 0, p2: 0 }
-  // ★タイムアウト管理（最後に増分が来てからの経過時間）
-  const lastMoveTime = { p1: 0, p2: 0 }
-  // ★前回の生データ（増分計算用）
-  const lastProcessedRaw = { p1: 0, p2: 0 } 
-  
   // メジアンフィルタ
   const getMedian = (arr) => {
     if (arr.length === 0) return 0
     const sorted = [...arr].sort((a, b) => a - b)
     return sorted[Math.floor(sorted.length / 2)]
   }
+
+  let serverOffset = null;
   
   // データ受信
-  const updateScores = (p1, p2) => {
+  const updateScores = (p1, p2, sourceTs) => {
+    const currentOffset = Date.now() - sourceTs
+      
+    if (serverOffset === null) {
+      serverOffset = currentOffset
+    } else {
+      // ★移動平均：今のオフセットに 5% だけ混ぜる（ゆっくり追従）
+      serverOffset = serverOffset * 0.95 + currentOffset * 0.05
+    }
     scoreHistory.p1.push(p1)
     scoreHistory.p2.push(p2)
     if (scoreHistory.p1.length > FILTER_WINDOW_SIZE) scoreHistory.p1.shift()
@@ -45,95 +48,168 @@
     const filtered = { 
       p1: getMedian(scoreHistory.p1), 
       p2: getMedian(scoreHistory.p2),
-      ts: Date.now() 
+      ts: sourceTs
     }
     timedHistory.push(filtered)
   
     if (timedHistory.length > 500) {
-      const cutoff = Date.now() - 10000
+      const cutoff = sourceTs - 10000
       while (timedHistory.length > 0 && timedHistory[0].ts < cutoff) timedHistory.shift()
     }
   }
+
+let playbackLoop = null;
+
+// ===============================================
+// 定数設定 (環境に合わせて調整してください)
+// ===============================================
+const SMALL_DIFF_TIMEOUT = 200;  // 精度差/小ミスを反映するまでの待機時間
+
+// Gate: 1フレームの最大増加量 (スパイクノイズ対策)
+// 同時押し等を考慮し、通常のプレイでは絶対に出ない値に設定
+const MAX_VALID_JUMP = 100000; 
+
+// Threshold: これ未満のズレは「ラグ」とみなさず即座に出す
+const LAG_GUARD_THRESHOLD = 300;
+
+// ===============================================
+// 状態変数 (Vueのref外で管理)
+// ===============================================
+let pendingDelta = { p1: 0, p2: 0 };     // バケツ (負の値も許容)
+let lastProcessedRaw = { p1: 0, p2: 0 }; // 前回処理したRawデータ
+let mismatchStartTime = null;            // タイマー開始時刻
+let lastProcessedIndex = -1;
+
+// ===============================================
+// メインループ関数
+// ===============================================
+const runPlayback = () => {
+  const now = Date.now();
+  const targetTs = now - DELAY_MS;
   
-  // --- 状態変数に追加 ---
-  let mismatchStartTime = null; // バケツの中身が食い違い始めた時刻
-  let playbackLoop = null;
+  // 対象データの検索
+  const baseIdx = timedHistory.findLastIndex(d => d.ts <= targetTs);
+  
+  if (baseIdx !== -1) {
+    const raw = timedHistory[baseIdx];
 
-  const runPlayback = () => {
-    const now = Date.now()
-    const targetTs = now - DELAY_MS 
-    
-    const baseIdx = timedHistory.findLastIndex(d => d.ts <= targetTs)
-    
-    if (baseIdx !== -1) {
-      const raw = timedHistory[baseIdx]
-
-      // (初期化処理は省略...)
-      if (lastProcessedRaw.p1 === 0 && lastProcessedRaw.p2 === 0 && (raw.p1 > 0 || raw.p2 > 0)) {
-          lastProcessedRaw.p1 = raw.p1;
-          lastProcessedRaw.p2 = raw.p2;
-          ocrScores.value = { p1: raw.p1, p2: raw.p2 };
-      }
-
-      // 1. バケツへの追加
-      const d1 = Math.max(0, raw.p1 - lastProcessedRaw.p1)
-      const d2 = Math.max(0, raw.p2 - lastProcessedRaw.p2)
-
-      if (d1 > 0) pendingDelta.p1 += d1
-      if (d2 > 0) pendingDelta.p2 += d2
-      
-      lastProcessedRaw.p1 = raw.p1
-      lastProcessedRaw.p2 = raw.p2
-
-      // 2. 同期放出（共通分の処理）
-      // 両方のバケツにある「共通量」は、ラグ関係なく即座に反映してOK
-      const common = Math.min(pendingDelta.p1, pendingDelta.p2)
-      
-      if (common > 0) {
-        ocrScores.value.p1 += common
-        ocrScores.value.p2 += common
-        pendingDelta.p1 -= common
-        pendingDelta.p2 -= common
-      }
-
-      // 3. 【修正版】タイムアウト判定（残存分の処理）
-      // バケツの中身に差があるか？（＝片方だけが多く溜まっているか？）
-      if (pendingDelta.p1 !== pendingDelta.p2) {
+    // -------------------------------------------------
+    // 【パート1：入力】 データ更新時のみ実行
+    // -------------------------------------------------
+    if (baseIdx !== lastProcessedIndex) {
         
-        // 差が生まれた瞬間なら、タイマー開始
-        if (mismatchStartTime === null) {
-          mismatchStartTime = now;
+        // 初回初期化
+        if (lastProcessedRaw.p1 === 0 && lastProcessedRaw.p2 === 0) {
+             lastProcessedRaw.p1 = raw.p1;
+             lastProcessedRaw.p2 = raw.p2;
+             // 初回は画面も同期させる
+             ocrScores.value.p1 = raw.p1;
+             ocrScores.value.p2 = raw.p2;
         } 
-        // すでに差がある状態が続いているなら、時間をチェック
-        else if (now - mismatchStartTime > MISS_TIMEOUT_MS) {
-          
-          // --- タイムアウト発生！強制放出 ---
-          
-          // P1が多く残っている場合（P2がミス、またはP1だけ連打など）
-          if (pendingDelta.p1 > pendingDelta.p2) {
-            const diff = pendingDelta.p1 - pendingDelta.p2;
-            ocrScores.value.p1 += diff; // 差分を画面に反映（バーが動く）
-            pendingDelta.p1 -= diff;    // バケツから消す
-          } 
-          // P2が多く残っている場合
-          else {
-            const diff = pendingDelta.p2 - pendingDelta.p1;
-            ocrScores.value.p2 += diff;
-            pendingDelta.p2 -= diff;
-          }
+        else {
+            // --- P1の計算 ---
+            let d1 = 0;
+            const diff1 = raw.p1 - lastProcessedRaw.p1;
+            
+            // Gate判定
+            if (diff1 > MAX_VALID_JUMP) {
+                d1 = 0; // スパイク無視
+            } else if (diff1 < -MAX_VALID_JUMP) {
+                // リセット検知（曲の最初に戻った等）
+                lastProcessedRaw.p1 = raw.p1;
+                pendingDelta.p1 = 0; // バケツリセット
+                ocrScores.value.p1 = raw.p1; // 画面リセット
+                d1 = 0;
+            } else {
+                // ★ここがポイント: マイナスの値もそのまま通す
+                d1 = diff1;
+                lastProcessedRaw.p1 = raw.p1;
+            }
 
-          // 強制放出したので、バケツは平らになった（不整合解消）
-          mismatchStartTime = null;
+            // --- P2の計算 ---
+            let d2 = 0;
+            const diff2 = raw.p2 - lastProcessedRaw.p2;
+
+            if (diff2 > MAX_VALID_JUMP) {
+                d2 = 0;
+            } else if (diff2 < -MAX_VALID_JUMP) {
+                lastProcessedRaw.p2 = raw.p2;
+                pendingDelta.p2 = 0;
+                ocrScores.value.p2 = raw.p2;
+                d2 = 0;
+            } else {
+                d2 = diff2;
+                lastProcessedRaw.p2 = raw.p2;
+            }
+
+            // バケツに加算（借金があれば相殺される）
+            pendingDelta.p1 += d1;
+            pendingDelta.p2 += d2;
         }
-
-      } else {
-        // バケツの中身が同じ（両方0、または両方同じだけ保留中）ならタイマーリセット
-        mismatchStartTime = null;
-      }
+        
+        // インデックス更新
+        lastProcessedIndex = baseIdx;
     }
 
-    playbackLoop = requestAnimationFrame(runPlayback)
+    // -------------------------------------------------
+    // 【パート2：出力】 毎フレーム実行
+    // -------------------------------------------------
+
+    // --- A. 共通分の放出 (同期) ---
+    // どちらかがマイナス(借金中)の場合、commonはマイナスになる
+    const common = Math.min(pendingDelta.p1, pendingDelta.p2);
+    
+    // プラスの時だけ放出する
+    // ※借金がある間は共通項が0以下になるので、バーは動かない（フリーズして待つ）
+        ocrScores.value.p1 += common;
+        ocrScores.value.p2 += common;
+        pendingDelta.p1 -= common;
+        pendingDelta.p2 -= common;
+
+    // --- B. 残留分の監視 (タイムアウト処理) ---
+    const currentDiff = Math.abs(pendingDelta.p1 - pendingDelta.p2);
+
+    if (currentDiff === 0) {
+        mismatchStartTime = null;
+    } 
+    else {
+        if (mismatchStartTime === null) mismatchStartTime = now;
+
+        const timeoutDuration = (currentDiff < LAG_GUARD_THRESHOLD) 
+                                ? SMALL_DIFF_TIMEOUT 
+                                : MISS_TIMEOUT_MS;
+
+        if (now - mismatchStartTime > timeoutDuration) {
+            // 強制放出ロジック
+            // ※「バケツにある分」しか出せないので、マイナスの場合は無視される
+            
+            if (pendingDelta.p1 > pendingDelta.p2) {
+                // P1が多い（P1が進んでいる or P2が借金中）
+                const diff = pendingDelta.p1 - pendingDelta.p2;
+                
+                // P1の手持ちがプラスなら、差分を解消するために吐き出す
+                if (pendingDelta.p1 > 0) {
+                    // 「必要な差分」と「手持ち」の少ない方を採用
+                    const flush = Math.min(pendingDelta.p1, diff);
+                    ocrScores.value.p1 += flush;
+                    pendingDelta.p1 -= flush;
+                }
+            } 
+            else { // P2が多い
+                const diff = pendingDelta.p2 - pendingDelta.p1;
+                if (pendingDelta.p2 > 0) {
+                    const flush = Math.min(pendingDelta.p2, diff);
+                    ocrScores.value.p2 += flush;
+                    pendingDelta.p2 -= flush;
+                }
+            }
+            mismatchStartTime = null;
+        }
+    }
   }
+  
+  playbackLoop = requestAnimationFrame(runPlayback);
+}
     
   // --- Computed & Config (変更なし) ---
   const scores = computed(() => config.value.manualMode ? config.value.manualScores : ocrScores.value)
@@ -159,8 +235,7 @@
       try {
         const msg = JSON.parse(event.data)
         if (msg.type === 'config') config.value = { ...config.value, ...msg.data }
-        else if (msg.type === 'score') updateScores(parseInt(msg.data.p1), parseInt(msg.data.p2))
-        else if (msg.p1 !== undefined) updateScores(parseInt(msg.p1), parseInt(msg.p2))
+        else if (msg.type === 'score') updateScores(parseInt(msg.data.p1), parseInt(msg.data.p2), msg.data.ts*1000)
       } catch (e) { console.error(e) }
     }
     ws.onclose = () => setTimeout(connect, 3000)
