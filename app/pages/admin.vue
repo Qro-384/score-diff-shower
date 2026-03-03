@@ -3,11 +3,11 @@
     
     // --- 設定: 事前に決めた5色 ---
     const PRESET_COLORS = [
-      '#ff4b4b', // 赤 (デフォルト)
-      '#4b4bff', // 青 (デフォルト)
-      '#2ecc71', // 緑
-      '#f1c40f', // 黄
-      '#9b59b6'  // 紫
+      '#4eaec6', // ABOVE
+      '#ffef49', // Limit Break3r
+      '#5a4498', // Cobalt Echo
+      '#aa0000', // 汝の縦連を愛せよ
+      '#00ffff'  // Lightning Speed
     ]
     
     // --- 状態管理 ---
