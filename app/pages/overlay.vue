@@ -14,8 +14,7 @@
   // --- パラメータ ---
   const MAX_SCORE_DIFF = 20000 
   const FILTER_WINDOW_SIZE = 3 
-  const DELAY_MS = 1000        // 全体のバッファ時間（大きめに確保）
-  const MISS_TIMEOUT_MS = 1500 // 「ミス」と確定するまでの待機時間（ラグの最大許容時間）
+  const DELAY_MS = 300        // 全体のバッファ時間（大きめに確保）
   
   // --- 内部バッファ ---
   const timedHistory = [] 
@@ -59,155 +58,36 @@
   }
 
 let playbackLoop = null;
-
 // ===============================================
-// 定数設定 (環境に合わせて調整してください)
-// ===============================================
-const SMALL_DIFF_TIMEOUT = 200;  // 精度差/小ミスを反映するまでの待機時間
-
-// Gate: 1フレームの最大増加量 (スパイクノイズ対策)
-// 同時押し等を考慮し、通常のプレイでは絶対に出ない値に設定
-const MAX_VALID_JUMP = 100000; 
-
-// Threshold: これ未満のズレは「ラグ」とみなさず即座に出す
-const LAG_GUARD_THRESHOLD = 300;
-
-// ===============================================
-// 状態変数 (Vueのref外で管理)
-// ===============================================
-let pendingDelta = { p1: 0, p2: 0 };     // バケツ (負の値も許容)
-let lastProcessedRaw = { p1: 0, p2: 0 }; // 前回処理したRawデータ
-let mismatchStartTime = null;            // タイマー開始時刻
-let lastProcessedIndex = -1;
-
-// ===============================================
-// メインループ関数
+// メイン関数 (シンプル版)
 // ===============================================
 const runPlayback = () => {
+  // 履歴データがない場合は何もしない
+  if (timedHistory.length === 0) {
+    playbackLoop = requestAnimationFrame(runPlayback);
+    return;
+  }
+
   const now = Date.now();
   const targetTs = now - DELAY_MS;
   
-  // 対象データの検索
+  // ターゲット時刻（現在時刻 - 1秒）に最も近い過去のデータを取得
   const baseIdx = timedHistory.findLastIndex(d => d.ts <= targetTs);
   
   if (baseIdx !== -1) {
     const raw = timedHistory[baseIdx];
 
-    // -------------------------------------------------
-    // 【パート1：入力】 データ更新時のみ実行
-    // -------------------------------------------------
-    if (baseIdx !== lastProcessedIndex) {
-        
-        // 初回初期化
-        if (lastProcessedRaw.p1 === 0 && lastProcessedRaw.p2 === 0) {
-             lastProcessedRaw.p1 = raw.p1;
-             lastProcessedRaw.p2 = raw.p2;
-             // 初回は画面も同期させる
-             ocrScores.value.p1 = raw.p1;
-             ocrScores.value.p2 = raw.p2;
-        } 
-        else {
-            // --- P1の計算 ---
-            let d1 = 0;
-            const diff1 = raw.p1 - lastProcessedRaw.p1;
-            
-            // Gate判定
-            if (diff1 > MAX_VALID_JUMP) {
-                d1 = 0; // スパイク無視
-            } else if (diff1 < -MAX_VALID_JUMP) {
-                // リセット検知（曲の最初に戻った等）
-                lastProcessedRaw.p1 = raw.p1;
-                pendingDelta.p1 = 0; // バケツリセット
-                ocrScores.value.p1 = raw.p1; // 画面リセット
-                d1 = 0;
-            } else {
-                // ★ここがポイント: マイナスの値もそのまま通す
-                d1 = diff1;
-                lastProcessedRaw.p1 = raw.p1;
-            }
-
-            // --- P2の計算 ---
-            let d2 = 0;
-            const diff2 = raw.p2 - lastProcessedRaw.p2;
-
-            if (diff2 > MAX_VALID_JUMP) {
-                d2 = 0;
-            } else if (diff2 < -MAX_VALID_JUMP) {
-                lastProcessedRaw.p2 = raw.p2;
-                pendingDelta.p2 = 0;
-                ocrScores.value.p2 = raw.p2;
-                d2 = 0;
-            } else {
-                d2 = diff2;
-                lastProcessedRaw.p2 = raw.p2;
-            }
-
-            // バケツに加算（借金があれば相殺される）
-            pendingDelta.p1 += d1;
-            pendingDelta.p2 += d2;
-        }
-        
-        // インデックス更新
-        lastProcessedIndex = baseIdx;
-    }
-
-    // -------------------------------------------------
-    // 【パート2：出力】 毎フレーム実行
-    // -------------------------------------------------
-
-    // --- A. 共通分の放出 (同期) ---
-    // どちらかがマイナス(借金中)の場合、commonはマイナスになる
-    const common = Math.min(pendingDelta.p1, pendingDelta.p2);
-    
-    // プラスの時だけ放出する
-    // ※借金がある間は共通項が0以下になるので、バーは動かない（フリーズして待つ）
-        ocrScores.value.p1 += common;
-        ocrScores.value.p2 += common;
-        pendingDelta.p1 -= common;
-        pendingDelta.p2 -= common;
-
-    // --- B. 残留分の監視 (タイムアウト処理) ---
-    const currentDiff = Math.abs(pendingDelta.p1 - pendingDelta.p2);
-
-    if (currentDiff === 0) {
-        mismatchStartTime = null;
-    } 
-    else {
-        if (mismatchStartTime === null) mismatchStartTime = now;
-
-        const timeoutDuration = (currentDiff < LAG_GUARD_THRESHOLD) 
-                                ? SMALL_DIFF_TIMEOUT 
-                                : MISS_TIMEOUT_MS;
-
-        if (now - mismatchStartTime > timeoutDuration) {
-            // 強制放出ロジック
-            // ※「バケツにある分」しか出せないので、マイナスの場合は無視される
-            
-            if (pendingDelta.p1 > pendingDelta.p2) {
-                // P1が多い（P1が進んでいる or P2が借金中）
-                const diff = pendingDelta.p1 - pendingDelta.p2;
-                
-                // P1の手持ちがプラスなら、差分を解消するために吐き出す
-                if (pendingDelta.p1 > 0) {
-                    // 「必要な差分」と「手持ち」の少ない方を採用
-                    const flush = Math.min(pendingDelta.p1, diff);
-                    ocrScores.value.p1 += flush;
-                    pendingDelta.p1 -= flush;
-                }
-            } 
-            else { // P2が多い
-                const diff = pendingDelta.p2 - pendingDelta.p1;
-                if (pendingDelta.p2 > 0) {
-                    const flush = Math.min(pendingDelta.p2, diff);
-                    ocrScores.value.p2 += flush;
-                    pendingDelta.p2 -= flush;
-                }
-            }
-            mismatchStartTime = null;
-        }
-    }
+    // ===============================================
+    // 生データをそのまま画面に反映 (補正一切なし)
+    // ===============================================
+    // P1, P2のスコアが更新されていようが止まっていようが、
+    // 減算方式だろうが加算方式だろうが、
+    // 今「timedHistory」に入っている値をただ表示するだけです。
+    ocrScores.value.p1 = raw.p1;
+    ocrScores.value.p2 = raw.p2;
   }
   
+  // 次の描画フレームへ
   playbackLoop = requestAnimationFrame(runPlayback);
 }
     
