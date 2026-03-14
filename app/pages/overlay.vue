@@ -13,10 +13,8 @@
   
   // --- パラメータ ---
   const MAX_SCORE_DIFF = 20000 
-  const FILTER_WINDOW_SIZE = 3 
-  const DELAY_MS = 300        // 全体のバッファ時間（大きめに確保）
-  
-  // --- 内部バッファ ---
+  const DELAY_MS = 50        // 全体のバッファ時間（大きめに確保）
+
   const timedHistory = [] 
   const scoreHistory = { p1: [], p2: [] }
   
@@ -26,36 +24,13 @@
     const sorted = [...arr].sort((a, b) => a - b)
     return sorted[Math.floor(sorted.length / 2)]
   }
-
-  let serverOffset = null;
   
-  // データ受信
-  const updateScores = (p1, p2, sourceTs) => {
-    const currentOffset = Date.now() - sourceTs
-      
-    if (serverOffset === null) {
-      serverOffset = currentOffset
-    } else {
-      // ★移動平均：今のオフセットに 5% だけ混ぜる（ゆっくり追従）
-      serverOffset = serverOffset * 0.95 + currentOffset * 0.05
-    }
-    scoreHistory.p1.push(p1)
-    scoreHistory.p2.push(p2)
-    if (scoreHistory.p1.length > FILTER_WINDOW_SIZE) scoreHistory.p1.shift()
-    if (scoreHistory.p2.length > FILTER_WINDOW_SIZE) scoreHistory.p2.shift()
-    
-    const filtered = { 
-      p1: getMedian(scoreHistory.p1), 
-      p2: getMedian(scoreHistory.p2),
-      ts: sourceTs
-    }
-    timedHistory.push(filtered)
-  
-    if (timedHistory.length > 500) {
-      const cutoff = sourceTs - 10000
-      while (timedHistory.length > 0 && timedHistory[0].ts < cutoff) timedHistory.shift()
-    }
-  }
+// データ受信 (これが呼ばれた瞬間に画面が変わる)
+const updateScores = (p1, p2, sourceTs) => {
+  // メジアンフィルタもバッファも使わず、即座にVueの変数に代入
+  ocrScores.value.p1 = p1;
+  ocrScores.value.p2 = p2;
+}
 
 let playbackLoop = null;
 // ===============================================
