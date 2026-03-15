@@ -1,110 +1,87 @@
 <script setup>
-  import { ref, computed, onMounted, onUnmounted } from 'vue'
-  
-  const ocrScores = ref({ p1: 0, p2: 0 }) 
-  const config = ref({
-    p1Color: '#ff4b4b',
-    p2Color: '#4b4bff',
-    drawColor: 'white',
-    swapSides: false,
-    manualMode: false,
-    manualScores: { p1: 0, p2: 0 }
-  })
-  
-  // --- パラメータ ---
-  const MAX_SCORE_DIFF = 20000 
-  const DELAY_MS = 50        // 全体のバッファ時間（大きめに確保）
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 
-  const timedHistory = [] 
-  const scoreHistory = { p1: [], p2: [] }
-  
-  // メジアンフィルタ
-  const getMedian = (arr) => {
-    if (arr.length === 0) return 0
-    const sorted = [...arr].sort((a, b) => a - b)
-    return sorted[Math.floor(sorted.length / 2)]
-  }
-  
-// データ受信 (これが呼ばれた瞬間に画面が変わる)
+const ocrScores = ref({ p1: 0, p2: 0 }) 
+const config = ref({
+  p1Color: '#ff4b4b',
+  p2Color: '#4b4bff',
+  drawColor: 'white',
+  swapSides: false,
+  swapOcr: false,
+  manualMode: false,
+  manualScores: { p1: 0, p2: 0 }
+})
+
+// --- パラメータ ---
+const MAX_SCORE_DIFF = 20000 
+// ※遅延用の DELAY_MS や timedHistory は不要になったため削除しました
+
+// データ受信 (これが呼ばれた瞬間に即座にVueの変数に代入)
 const updateScores = (p1, p2, sourceTs) => {
-  // メジアンフィルタもバッファも使わず、即座にVueの変数に代入
   ocrScores.value.p1 = p1;
   ocrScores.value.p2 = p2;
 }
 
-let playbackLoop = null;
-// ===============================================
-// メイン関数 (シンプル版)
-// ===============================================
-const runPlayback = () => {
-  // 履歴データがない場合は何もしない
-  if (timedHistory.length === 0) {
-    playbackLoop = requestAnimationFrame(runPlayback);
-    return;
+// --- Computed & Config ---
+const scores = computed(() => {
+  // 1. 手動モードがONなら手動スコアを表示
+  if (config.value.manualMode) {
+    return config.value.manualScores;
   }
-
-  const now = Date.now();
-  const targetTs = now - DELAY_MS;
-  
-  // ターゲット時刻（現在時刻 - 1秒）に最も近い過去のデータを取得
-  const baseIdx = timedHistory.findLastIndex(d => d.ts <= targetTs);
-  
-  if (baseIdx !== -1) {
-    const raw = timedHistory[baseIdx];
-
-    // ===============================================
-    // 生データをそのまま画面に反映 (補正一切なし)
-    // ===============================================
-    // P1, P2のスコアが更新されていようが止まっていようが、
-    // 減算方式だろうが加算方式だろうが、
-    // 今「timedHistory」に入っている値をただ表示するだけです。
-    ocrScores.value.p1 = raw.p1;
-    ocrScores.value.p2 = raw.p2;
+  // 2. OCRデータ交差(swapOcr)がONなら、データを入れ替えて表示
+  if (config.value.swapOcr) {
+    return {
+      p1: ocrScores.value.p2,
+      p2: ocrScores.value.p1
+    };
   }
-  
-  // 次の描画フレームへ
-  playbackLoop = requestAnimationFrame(runPlayback);
+  // 3. どちらもOFFなら生のデータをそのまま表示
+  return ocrScores.value;
+})
+
+const diff = computed(() => scores.value.p1 - scores.value.p2)
+const absDiff = computed(() => Math.round(Math.abs(diff.value)))
+
+const diffColor = computed(() => {
+  if (Math.abs(diff.value) < 10) return config.value.drawColor
+  return diff.value > 0 ? config.value.p1Color : config.value.p2Color
+})
+
+const p1BarPercent = computed(() => {
+  const _diff = diff.value
+  let diffRatio = Math.sign(_diff) * Math.pow(Math.abs(_diff) / MAX_SCORE_DIFF, 0.5) * 0.95
+  diffRatio = Math.max(-0.95, Math.min(0.95, diffRatio))
+  return 50 + (diffRatio * 50)
+})
+const p2BarPercent = computed(() => 100 - p1BarPercent.value)
+
+let ws = null
+const connect = () => {
+  const WS_URL = "wss://score-diff-server.fly.dev/ws"
+  ws = new WebSocket(WS_URL)
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data)
+      if (msg.type === 'config') {
+        // コントローラからの設定変更を受信
+        config.value = { ...config.value, ...msg.data }
+      } else if (msg.type === 'score') {
+        // OCRからのスコアを受信
+        updateScores(parseInt(msg.data.p1), parseInt(msg.data.p2), msg.data.ts*1000)
+      }
+    } catch (e) { console.error(e) }
+  }
+  ws.onclose = () => setTimeout(connect, 3000)
 }
-    
-  // --- Computed & Config (変更なし) ---
-  const scores = computed(() => config.value.manualMode ? config.value.manualScores : ocrScores.value)
-  const diff = computed(() => scores.value.p1 - scores.value.p2)
-  const absDiff = computed(() => Math.round(Math.abs(diff.value)))
-  const diffColor = computed(() => {
-    if (Math.abs(diff.value) < 10) return config.value.drawColor
-    return diff.value > 0 ? config.value.p1Color : config.value.p2Color
-  })
-  const p1BarPercent = computed(() => {
-    const _diff = diff.value
-    let diffRatio = Math.sign(_diff) * Math.pow(Math.abs(_diff) / MAX_SCORE_DIFF, 0.5) * 0.95
-    diffRatio = Math.max(-0.95, Math.min(0.95, diffRatio))
-    return 50 + (diffRatio * 50)
-  })
-  const p2BarPercent = computed(() => 100 - p1BarPercent.value)
-  
-  let ws = null
-  const connect = () => {
-    const WS_URL = "wss://score-diff-server.fly.dev/ws"
-    ws = new WebSocket(WS_URL)
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data)
-        if (msg.type === 'config') config.value = { ...config.value, ...msg.data }
-        else if (msg.type === 'score') updateScores(parseInt(msg.data.p1), parseInt(msg.data.p2), msg.data.ts*1000)
-      } catch (e) { console.error(e) }
-    }
-    ws.onclose = () => setTimeout(connect, 3000)
-  }
-  
-  onMounted(() => {
-    connect()
-    runPlayback()
-  })
-  onUnmounted(() => {
-    if (ws) ws.close()
-    if (playbackLoop) cancelAnimationFrame(playbackLoop)
-  })
-  </script>
+
+onMounted(() => {
+  connect()
+  // ※runPlayback() の呼び出しは不要になったため削除しました
+})
+onUnmounted(() => {
+  if (ws) ws.close()
+})
+</script>
   
   <template>
     <div class="overlay-container">
