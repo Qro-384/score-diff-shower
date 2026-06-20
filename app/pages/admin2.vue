@@ -8,7 +8,8 @@ const PRESET_TEAMS = [
   { color: '#ffef49', name: 'Limit Break3r', image: '/img/limit.webp' },
   { color: '#5a4498', name: 'Cobalt Echo', image: '/img/cobalt.jpeg' },
   { color: '#aa0000', name: '汝の縦連を愛せよ', image: '/img/tateren.webp' },
-  { color: '#00ffff', name: 'Lightning Speed', image: '/img/lightning.webp' }
+  { color: '#00ffff', name: 'Lightning Speed', image: '/img/lightning.webp' },
+  { color: '#86ff66', name: '運営チーム', image: 'img/admin.png'}
 ]
 
 // --- 状態管理 ---
